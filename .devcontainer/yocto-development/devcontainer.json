@@ -61,6 +61,10 @@
 					{
 						"name": "beaglebone-ti",
 						"pathToBuildFolder": "${workspaceFolder}/build-ti"
+					},
+					{
+						"name": "stm32mp1",
+						"pathToBuildFolder": "${workspaceFolder}/build-st"
 					}
 				],
 				"bitbake.pathToEnvScript": "${workspaceFolder}/sources/poky/oe-init-build-env",

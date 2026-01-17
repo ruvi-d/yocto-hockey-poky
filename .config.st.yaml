@@ -1,0 +1,20 @@
+header:
+  version: 11
+
+machine: stm32mp15-disco
+
+repos:
+  meta-openembedded:
+    url: "https://github.com/openembedded/meta-openembedded.git"
+    commit: 2df869df1c3fa74103098bba65c06e55d0d3664a
+    branch: scarthgap
+    path: sources/meta-openembedded
+    layers:
+      meta-oe:
+      meta-python:
+
+  meta-st-stm32mp:
+    url: "https://github.com/STMicroelectronics/meta-st-stm32mp.git"
+    # Commit for openstlinux-6.6-yocto-scarthgap-mpu-v25.08.27
+    commit: a9bfa3888324998e5c7bf9c159833ae577983bb2
+    path: sources/meta-st-stm32mp
