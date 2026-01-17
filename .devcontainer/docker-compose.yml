@@ -1,0 +1,17 @@
+services:
+  crops-yocto:
+    image: ruvid/yocto-development:ubuntu-22.04
+    command: sleep infinity
+    environment:
+      # Pass Bitbake linter config location
+      - OELINT_CONFIG=/workspaces/yocto-hockey-poky/.oelint.cfg
+    volumes:
+      # Mount working dir
+      - ..:/workspaces/yocto-hockey-poky
+      # Mount shared caches dir
+      - ${HOME}/yocto-caches:/workspaces/caches
+      # Mount SSH credentials for git access
+      - ${HOME}/.ssh:/home/yoctouser/.ssh:ro
+      # Mount shell history files
+      - ${HOME}/.zsh_history:/home/yoctouser/.zsh_history
+      - ${HOME}/.bash_history:/home/yoctouser/.bash_history
