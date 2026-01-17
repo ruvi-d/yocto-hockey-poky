@@ -1,0 +1,21 @@
+header:
+  version: 11
+
+machine: beaglebone
+
+repos:
+  meta-arm:
+    url: "git://git.yoctoproject.org/meta-arm"
+    tag: yocto-5.0.3
+    path: sources/meta-arm
+    layers:
+      meta-arm:
+      meta-arm-toolchain:
+
+  meta-ti:
+    url: "https://git.yoctoproject.org/git/meta-ti"
+    tag: 11.02.05
+    path: sources/meta-ti
+    layers:
+      meta-beagle:
+      meta-ti-bsp:

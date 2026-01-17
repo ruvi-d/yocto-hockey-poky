@@ -57,6 +57,10 @@
 					{
 						"name": "beaglebone-yocto",
 						"pathToBuildFolder": "${workspaceFolder}/build"
+					},
+					{
+						"name": "beaglebone-ti",
+						"pathToBuildFolder": "${workspaceFolder}/build-ti"
 					}
 				],
 				"bitbake.pathToEnvScript": "${workspaceFolder}/sources/poky/oe-init-build-env",
