@@ -1,0 +1,52 @@
+{
+    "version": "1.0",
+    "description": "Hockey Pokey (wrynose)",
+    "sources": {
+        "bitbake": {
+            "git-remote": {
+                "uri": "https://git.openembedded.org/bitbake",
+                "branch": "2.18",
+                "rev": "51fd94a67fa17650a9ff623492005972bbc7d26f"
+            }
+        },
+        "openembedded-core": {
+            "git-remote": {
+                "uri": "https://git.openembedded.org/openembedded-core",
+                "branch": "wrynose",
+                "rev": "0f03c732a0a2d0506b41b1abe60b3f368b2300dc"
+            }
+        },
+        "meta-yocto": {
+            "git-remote": {
+                "uri": "https://git.yoctoproject.org/meta-yocto",
+                "branch": "wrynose",
+                "rev": "7c25b11156553145fa6b241a2d4f65d94438f804"
+            }
+        }
+    },
+    "bitbake-setup": {
+        "configurations": [
+            {
+                "bb-layers": [
+                    "openembedded-core/meta",
+                    "meta-yocto/meta-yocto-bsp",
+                    "meta-yocto/meta-poky"
+                ],
+                "setup-dir-name": "hockey-pokey",
+                "oe-fragments": [
+                    "distro/poky-tiny",
+                    "core/yocto/sstate-mirror-cdn",
+                    "core/yocto/root-login-with-empty-password"
+                ],
+                "configurations": [
+                    {
+                        "name": "qemuarm64",
+                        "description": "Test qemuarm64 machine",
+                        "oe-fragments": ["machine/qemuarm64"],
+                        "setup-dir-name": "-qemuarm64"
+                    }
+                ]
+            }
+        ]
+    }
+}
