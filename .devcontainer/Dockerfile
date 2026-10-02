@@ -14,7 +14,7 @@ RUN apt-get update && \
 
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir "bitbake_setup==2.19.0"
+RUN pip install --no-cache-dir "bitbake_setup==2.19.0" "websockets==17.1"
 
 # Switch user to 1000 uid user "ubuntu"
 USER ubuntu

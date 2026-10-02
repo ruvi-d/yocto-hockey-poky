@@ -35,7 +35,6 @@
                 "setup-dir-name": "hockey-pokey",
                 "oe-fragments": [
                     "distro/poky-tiny",
-                    "core/yocto/sstate-mirror-cdn",
                     "core/yocto/root-login-with-empty-password"
                 ],
                 "configurations": [
