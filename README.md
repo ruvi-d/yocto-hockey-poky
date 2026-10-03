@@ -35,15 +35,19 @@ empty password. That is for QEMU development only; do not ship it.
 | `qemuarm64` | `qemuarm64`  | `bitbake-builds/hockey-qemuarm64` |
 | `qemuarm`   | `qemuarm`    | `bitbake-builds/hockey-qemuarm`   |
 
+When adding a configuration, set its `setup-dir-name` to `-<config name>`, so
+that its build directory is `bitbake-builds/hockey-<config name>`. `setup.sh`
+relies on that name to find the generated VS Code workspace.
+
 ## Prerequisites (host)
 
 - Docker and VS Code with the Dev Containers extension.
 - Your host user should be UID 1000: the container user `ubuntu` is UID 1000
   and the repo is bind-mounted.
-- These host paths are mounted into the container, so they must exist:
+- These host paths are mounted into the container. If they are missing, the
+  dev container's `initializeCommand` creates them on the host before startup:
   - `~/.ssh` (read-only, for git access)
-  - `~/.zsh_history` and `~/.bash_history`. Create them with `touch` if they
-    are missing, otherwise Docker creates them as directories.
+  - `~/.zsh_history` and `~/.bash_history`
   - `~/.claude`
 - Downloads and sstate are shared between builds and kept on the host in
   `~/projects/yocto-wrynose-caches` (created automatically). Inside the
@@ -53,7 +57,7 @@ empty password. That is for QEMU development only; do not ship it.
 ## Setup
 
 1. Open this repo in VS Code and choose **Reopen in Container**.
-2. In the container terminal, initialise a build configuration:
+2. In the container terminal, initialize a build configuration:
 
    ```sh
    ./setup.sh qemuarm64
@@ -62,6 +66,16 @@ empty password. That is for QEMU development only; do not ship it.
    This runs `bitbake-setup init` with `hockey-poky.conf.json` and adds this
    repo to the generated VS Code workspace as the `hockey-poky` folder.
    bitbake-setup keeps that folder on later updates.
+
+   Run `setup.sh` only once per configuration. If the build directory already
+   exists, `bitbake-setup init` does not reuse it: it starts a second setup in
+   a directory with a longer name. To sync an existing build with
+   `hockey-poky.conf.json`, run:
+
+   ```sh
+   bitbake-setup status --setup-dir bitbake-builds/hockey-qemuarm64
+   bitbake-setup update --setup-dir bitbake-builds/hockey-qemuarm64
+   ```
 
 3. Open the generated workspace
    `bitbake-builds/hockey-qemuarm64/bitbake.code-workspace`, either:
@@ -91,7 +105,7 @@ runqemu slirp nographic
 
 Log in as `root` with no password. Exit QEMU with `Ctrl-a x`.
 
-## Adding customisations
+## Adding customizations
 
 Put recipes and bbappends in `meta-hockey/recipes-*/<name>/`. The layer is
 already in every build's `bblayers.conf` (via `bb-layers-file-relative` in

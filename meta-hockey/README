@@ -33,7 +33,7 @@ The layer is added to bblayers.conf automatically by bitbake-setup via the
 "bb-layers-file-relative" entry in hockey-poky.conf.json (see the top-level
 README.md).
 
-For other build setups, run from an initialised build environment:
+For other build setups, run from an initialized build environment:
 
   bitbake-layers add-layer /path/to/meta-hockey
 

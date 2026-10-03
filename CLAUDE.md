@@ -5,7 +5,7 @@ the repo layout and human setup steps.
 
 ## Where to make changes
 
-- Local customisations go in `meta-hockey/` (tracked).
+- Local customizations go in `meta-hockey/` (tracked).
 - `bitbake-builds/` is generated and untracked. Do not edit the upstream layers
   under `bitbake-builds/*/layers/`; use a bbappend in `meta-hockey` instead.
 - Sources, layers and machines are defined in `hockey-poky.conf.json`.

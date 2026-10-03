@@ -1,5 +1,5 @@
 #!/bin/sh
-# Initialise a bitbake-setup build for one configuration in hockey-poky.conf.json
+# Initialize a bitbake-setup build for one configuration in hockey-poky.conf.json
 # and add this repo (and so meta-hockey) to the generated VS Code workspace.
 #
 # Usage: ./setup.sh <config>   e.g. ./setup.sh qemuarm64
