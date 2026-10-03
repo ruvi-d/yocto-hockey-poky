@@ -32,6 +32,9 @@
                     "meta-yocto/meta-yocto-bsp",
                     "meta-yocto/meta-poky"
                 ],
+                "bb-layers-file-relative": [
+                    "meta-hockey"
+                ],
                 "setup-dir-name": "hockey",
                 "oe-fragments": [
                     "distro/poky-tiny",

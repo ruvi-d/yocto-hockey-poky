@@ -29,9 +29,13 @@ Table of Contents
 I. Adding the meta-hockey layer to your build
 =================================================
 
-From an initialised build environment (see the top-level README.md), run:
+The layer is added to bblayers.conf automatically by bitbake-setup via the
+"bb-layers-file-relative" entry in hockey-pokey.conf.json (see the top-level
+README.md).
 
-  bitbake-layers add-layer /workspace/yocto-hockey-poky/meta-hockey
+For other build setups, run from an initialised build environment:
+
+  bitbake-layers add-layer /path/to/meta-hockey
 
 II. Misc
 ========
