@@ -6,6 +6,9 @@ services:
     environment:
       # Pass Bitbake linter config location
       - OELINT_CONFIG=/workspace/yocto-hockey-poky/.oelint.cfg
+      # Pass through local shared dl and sstate cache
+      - DL_DIR=/workspace/caches/downloads
+      - SSTATE_DIR=/workspace/caches/sstate-cache
     volumes:
       # Mount working dir
       - ../:/workspace/yocto-hockey-poky

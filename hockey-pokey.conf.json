@@ -27,6 +27,7 @@
     "bitbake-setup": {
         "configurations": [
             {
+                "bb-env-passthrough-additions": ["DL_DIR","SSTATE_DIR"],
                 "bb-layers": [
                     "openembedded-core/meta",
                     "meta-yocto/meta-yocto-bsp",
