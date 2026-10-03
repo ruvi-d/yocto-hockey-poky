@@ -21,3 +21,8 @@ RUN pip install --no-cache-dir "bitbake_setup==2.19.0" "websockets==17.1"
 
 # Switch user to 1000 uid user "ubuntu"
 USER ubuntu
+
+# The BitBake extension's terminal hardcodes bash. Hand off to zsh when it sets
+# BITBAKE_ZSH (see bitbake.shellEnv in devcontainer.json). The build
+# environment is exported, so zsh inherits it.
+RUN printf '\n%s\n' 'if [[ $- == *i* && -n $BITBAKE_ZSH ]]; then unset BITBAKE_ZSH; exec zsh; fi' >> ~/.bashrc

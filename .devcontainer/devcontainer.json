@@ -55,6 +55,10 @@
 					"**/bitbake-builds/*"
 				],
 				"terminal.integrated.defaultProfile.linux": "zsh",
+				// The BitBake terminal always starts bash; ~/.bashrc execs zsh when this is set
+				"bitbake.shellEnv": {
+					"BITBAKE_ZSH": "1"
+				},
 				"files.associations": {
 					"log.*": "log",
 					"run.*": "python"
