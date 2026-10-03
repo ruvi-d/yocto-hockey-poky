@@ -1,0 +1,20 @@
+services:
+  yocto-dev:
+    build:
+      dockerfile: Dockerfile
+    command: sleep infinity
+    environment:
+      # Pass Bitbake linter config location
+      - OELINT_CONFIG=/workspace/yocto-hockey-poky/.oelint.cfg
+    volumes:
+      # Mount working dir
+      - ../:/workspace/yocto-hockey-poky
+      # Mount shared caches dir
+      - ${HOME}/projects/yocto-wrynose-caches:/workspace/caches
+      # Mount SSH credentials for git access
+      - ${HOME}/.ssh:/home/ubuntu/.ssh:ro
+      # Mount shell history files
+      - ${HOME}/.zsh_history:/home/ubuntu/.zsh_history
+      - ${HOME}/.bash_history:/home/ubuntu/.bash_history
+      # Mount Claude meta data
+      - ${HOME}/.claude:/home/ubuntu/.claude

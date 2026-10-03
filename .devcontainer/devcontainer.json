@@ -1,0 +1,65 @@
+{
+	"name": "CROPS 24.04",
+	"dockerComposeFile": "compose.yaml",
+	"service": "yocto-dev",
+	"workspaceFolder": "/workspace/yocto-hockey-poky",
+	// Initialize the host machine
+	"initializeCommand": {
+		"createCacheDir": "mkdir -p ~/projects/yocto-wrynose-caches"
+	},
+	// Add ZSH support
+	"features": {
+		"ghcr.io/nils-geistmann/devcontainers-features/zsh:0": {
+			"plugins": "git zsh-autosuggestions"
+		}
+	},
+	"postCreateCommand": "git clone https://github.com/zsh-users/zsh-autosuggestions ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"yocto-project.yocto-bitbake",
+				"streetsidesoftware.code-spell-checker",
+				"mads-hartmann.bash-ide-vscode",
+				"ms-python.vscode-pylance",
+				"ms-python.python",
+				"ms-python.debugpy",
+				"ms-vscode.makefile-tools",
+				"ms-vscode.cpptools-extension-pack",
+				"wickscc.openembedded-kickstart",
+				"plorefice.devicetree",
+				"moshfeu.diff-merge",
+				"ms-python.black-formatter",
+				"kweihmann.oelint-vscode",
+				"Anthropic.claude-code"
+			],
+			"settings": {
+				// Disable auto save to limit the times Bitbake plugin spins up
+				"files.autoSave": "off",
+				// Enable format on manual save. This is format known types like .py files
+				"editor.formatOnSave": true,
+				"files.watcherExclude": {
+					"**/bitbake-builds/*": true
+				},
+				"search.exclude": {
+					"**/bitbake-builds/*": true
+				},
+				"C_Cpp.files.exclude": {
+					"**/bitbake-builds/*": true
+				},
+				"python.analysis.exclude": [
+					"**/bitbake-builds/*"
+				],
+				"git.repositoryScanIgnoredFolders": [
+					"**/bitbake-builds/*"
+				],
+				"terminal.integrated.defaultProfile.linux": "zsh",
+				"files.associations": {
+					"log.*": "log",
+					"run.*": "python"
+				},
+				"oelint-vscode.run.fix": true,
+				"oelint-vscode.run.mode": "all"
+			}
+		}
+	}
+}
