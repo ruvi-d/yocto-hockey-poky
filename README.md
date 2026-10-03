@@ -50,9 +50,11 @@ relies on that name to find the generated VS Code workspace.
   - `~/.zsh_history` and `~/.bash_history`
   - `~/.claude`
 - Downloads and sstate are shared between builds and kept on the host in
-  `~/projects/yocto-wrynose-caches` (created automatically). Inside the
-  container they are at `/workspace/caches/{downloads,sstate-cache}` and
-  reach bitbake through the `DL_DIR` and `SSTATE_DIR` environment variables.
+  `~/projects/yocto-wrynose-caches` (created automatically). To use another
+  host directory, export `YOCTO_CACHE_DIR` in your host shell profile before
+  starting VS Code, then rebuild the container. Inside the container the
+  caches are at `/workspace/caches/{downloads,sstate-cache}` and reach bitbake
+  through the `DL_DIR` and `SSTATE_DIR` environment variables.
 
 ## Setup
 

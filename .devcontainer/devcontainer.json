@@ -5,7 +5,7 @@
 	"workspaceFolder": "/workspace/yocto-hockey-poky",
 	// Initialize the host machine
 	"initializeCommand": {
-		"createCacheDir": "mkdir -p ~/projects/yocto-wrynose-caches",
+		"createCacheDir": "mkdir -p \"${YOCTO_CACHE_DIR:-$HOME/projects/yocto-wrynose-caches}\"",
 		// Create bind-mount sources in compose.yaml, else Docker creates them as directories
 		"createMountSources": "mkdir -p ~/.ssh ~/.claude && touch ~/.zsh_history ~/.bash_history"
 	},

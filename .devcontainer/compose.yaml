@@ -13,7 +13,7 @@ services:
       # Mount working dir
       - ../:/workspace/yocto-hockey-poky
       # Mount shared caches dir
-      - ${HOME}/projects/yocto-wrynose-caches:/workspace/caches
+      - ${YOCTO_CACHE_DIR:-${HOME}/projects/yocto-wrynose-caches}:/workspace/caches
       # Mount SSH credentials for git access
       - ${HOME}/.ssh:/home/ubuntu/.ssh:ro
       # Mount shell history files
