@@ -32,7 +32,7 @@
                     "meta-yocto/meta-yocto-bsp",
                     "meta-yocto/meta-poky"
                 ],
-                "setup-dir-name": "hockey-pokey",
+                "setup-dir-name": "hockey",
                 "oe-fragments": [
                     "distro/poky-tiny",
                     "core/yocto/root-login-with-empty-password"
@@ -43,6 +43,12 @@
                         "description": "Test qemuarm64 machine",
                         "oe-fragments": ["machine/qemuarm64"],
                         "setup-dir-name": "-qemuarm64"
+                    },
+                    {
+                        "name": "qemuarm",
+                        "description": "Test qemuarm machine",
+                        "oe-fragments": ["machine/qemuarm"],
+                        "setup-dir-name": "-qemuarm"
                     }
                 ]
             }
