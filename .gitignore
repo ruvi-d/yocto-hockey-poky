@@ -1,2 +1,4 @@
 bitbake-builds/
 pyshtables.py
+.devcontainer/devcontainer-lock.json
+__pycache__/
