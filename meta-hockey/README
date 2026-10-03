@@ -1,0 +1,43 @@
+This README file contains information on the contents of the meta-hockey layer.
+
+Please see the corresponding sections below for details.
+
+Dependencies
+============
+
+  URI: https://git.yoctoproject.org/meta-yocto
+  branch: wrynose
+
+The exact revisions used for development are pinned in hockey-pokey.conf.json
+at the root of the yocto-hockey-poky repository.
+
+Patches
+=======
+
+Please submit any patches against the meta-hockey layer as pull requests to
+https://github.com/ruvi-d/yocto-hockey-poky
+
+Maintainer: Ruvinda Dhambarage <contact@ruvi.tech>
+
+Table of Contents
+=================
+
+  I. Adding the meta-hockey layer to your build
+ II. Misc
+
+
+I. Adding the meta-hockey layer to your build
+=================================================
+
+From an initialised build environment (see the top-level README.md), run:
+
+  bitbake-layers add-layer /workspace/yocto-hockey-poky/meta-hockey
+
+II. Misc
+========
+
+The layer currently contains no recipes. Recipes should be added under
+recipes-*/<name>/ directories, which conf/layer.conf picks up automatically.
+
+The layer is only compatible with the wrynose release series
+(LAYERSERIES_COMPAT_meta-hockey = "wrynose").
