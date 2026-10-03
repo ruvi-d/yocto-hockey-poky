@@ -5,7 +5,7 @@ Please see the corresponding sections below for details.
 Dependencies
 ============
 
-  URI: https://git.yoctoproject.org/meta-yocto
+  URI: https://git.openembedded.org/openembedded-core
   branch: wrynose
 
 The exact revisions used for development are pinned in hockey-pokey.conf.json
