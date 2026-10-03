@@ -8,7 +8,7 @@ Dependencies
   URI: https://git.openembedded.org/openembedded-core
   branch: wrynose
 
-The exact revisions used for development are pinned in hockey-pokey.conf.json
+The exact revisions used for development are pinned in hockey-poky.conf.json
 at the root of the yocto-hockey-poky repository.
 
 Patches
@@ -30,7 +30,7 @@ I. Adding the meta-hockey layer to your build
 =================================================
 
 The layer is added to bblayers.conf automatically by bitbake-setup via the
-"bb-layers-file-relative" entry in hockey-pokey.conf.json (see the top-level
+"bb-layers-file-relative" entry in hockey-poky.conf.json (see the top-level
 README.md).
 
 For other build setups, run from an initialised build environment:
