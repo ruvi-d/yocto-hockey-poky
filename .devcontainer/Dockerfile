@@ -18,7 +18,8 @@ ENV PATH="/opt/venv/bin:$PATH"
 # not match the bitbake 2.18 pinned in hockey-poky.conf.json.
 # websockets is needed by the hashserv client.
 # oelint-adv is required for the oelint-vscode extension
-RUN pip install --no-cache-dir "bitbake_setup==2.19.0" "websockets==17.1" "oelint-adv==9.11.2"
+# setuptools for recipetool
+RUN pip install --no-cache-dir "bitbake_setup==2.19.0" "websockets==17.1" "oelint-adv==9.11.2" "setuptools==84.0.0"
 
 # Switch user to 1000 uid user "ubuntu"
 USER ubuntu
