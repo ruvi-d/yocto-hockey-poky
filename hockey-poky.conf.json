@@ -43,7 +43,7 @@
                 "oe-fragments": [
                     "distro/poky-tiny",
                     "core/yocto/root-login-with-empty-password",
-                    "meta-hockey/qemu-virtio-console"
+                    "meta-hockey/qemu-serial-console"
                 ],
                 "configurations": [
                     {
