@@ -41,7 +41,6 @@
                 ],
                 "setup-dir-name": "hockey",
                 "oe-fragments": [
-                    "distro/poky-tiny",
                     "core/yocto/root-login-with-empty-password",
                     "meta-hockey/qemu-serial-console"
                 ],
@@ -50,14 +49,25 @@
                         "name": "qemuarm64",
                         "description": "Test qemuarm64 machine",
                         "oe-fragments": [
+                            "distro/poky-tiny",
                             "machine/qemuarm64"
                         ],
                         "setup-dir-name": "-qemuarm64"
                     },
                     {
+                        "name": "qemuarm64-poky",
+                        "description": "Poky qemuarm64 machine",
+                        "oe-fragments": [
+                            "distro/poky",
+                            "machine/qemuarm64"
+                        ],
+                        "setup-dir-name": "-qemuarm64-poky"
+                    },
+                    {
                         "name": "qemuarm",
                         "description": "Test qemuarm machine",
                         "oe-fragments": [
+                            "distro/poky-tiny",
                             "machine/qemuarm"
                         ],
                         "setup-dir-name": "-qemuarm"
