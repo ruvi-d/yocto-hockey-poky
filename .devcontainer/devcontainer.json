@@ -12,10 +12,13 @@
 	// Add ZSH support
 	"features": {
 		"ghcr.io/nils-geistmann/devcontainers-features/zsh:0": {
-			"plugins": "git zsh-autosuggestions"
+			"plugins": "git zsh-autosuggestions zsh-bitbake"
 		}
 	},
-	"postCreateCommand": "git clone https://github.com/zsh-users/zsh-autosuggestions ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions",
+	"postCreateCommand": {
+		"zshAutosuggestions": "git clone https://github.com/zsh-users/zsh-autosuggestions ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions",
+		"zshBitbake": "git clone https://github.com/antznin/zsh-bitbake.git ~/.oh-my-zsh/custom/plugins/zsh-bitbake"
+	},
 	"customizations": {
 		"vscode": {
 			"extensions": [
