@@ -54,6 +54,11 @@
 				"git.repositoryScanIgnoredFolders": [
 					"**/bitbake-builds/*"
 				],
+				// Upstream layers are not edited (use a bbappend in meta-hockey). Read-only
+				// also stops oelint-vscode's fix-on-save from rewriting them.
+				"files.readonlyInclude": {
+					"**/bitbake-builds/*/layers/**": true
+				},
 				"terminal.integrated.defaultProfile.linux": "zsh",
 				// The BitBake terminal always starts bash; ~/.bashrc execs zsh when this is set
 				"bitbake.shellEnv": {
