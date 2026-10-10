@@ -134,7 +134,7 @@ libwhydemo  libwhydemo-dbg  libwhydemo-dev  libwhydemo-src
 > `zlib` → `libz1`. buildhistory, dnf and the image manifest use the **renamed**
 > name; `oe-pkgdata-util read-value`, `find-path` and recipe metadata use the
 > **original** name. Translate with `lookup-pkg` / `lookup-pkg -r` when a grep
-> comes back empty.
+> comes back empty. Section 9 explains the rules, with openssl as a full example.
 
 ## 2. Find who pulls it in
 
@@ -184,7 +184,7 @@ The edge tells you the kind; the parent recipe tells you where it came from.
 
 ### 3a. Explicit `RDEPENDS` / `RRECOMMENDS` / `RPROVIDES`
 
-`bitbake-getvar` without `--value` prints every file and line that touched the
+`bitbake-getvar` with `--value` prints every file and line that touched the
 variable. Use the **package** name in the override and the **recipe** name for
 `-r`:
 
@@ -331,7 +331,9 @@ $ grep xauth $BH/depends.dot $BH/installed-package-names.txt
 .../depends.dot:"dropbear" -> "xauth" [style=dotted]
 ```
 
-Always confirm against `installed-package-names.txt`.
+The same happens when the recommended package was never created because it
+is empty (`openssl-ossl-module-legacy`, see section 9). Always confirm against
+`installed-package-names.txt`.
 
 **With rpm, `BAD_RECOMMENDATIONS` is a hard exclude.** OE passes both
 `BAD_RECOMMENDATIONS` and `PACKAGE_EXCLUDE` to dnf as `-x` (shown as
@@ -384,9 +386,9 @@ built when `BAD_RECOMMENDATIONS` keeps them out. See
 comes from shlibs, not from the recipe. Check with 3b before searching the
 layers for a `RDEPENDS` that does not exist.
 
-**pkgdata and the image use different names.** See the renaming note in
-section 1. `oe-pkgdata-util read-value RDEPENDS kmod` says `libcrypto`, the
-image has `libcrypto3`.
+**pkgdata and the image use different names.** See section 9.
+`oe-pkgdata-util read-value RDEPENDS kmod` says `libcrypto`, the image has
+`libcrypto3`.
 
 **Weak dependencies you never wrote.** `NO_RECOMMENDATIONS = "1"` drops *all*
 recommendations, including `MACHINE_EXTRA_RRECOMMENDS` (kernel modules,
@@ -487,6 +489,211 @@ not in `image_initial_manifest`; listed on the
 `"sysvinit-inittab" -> "ttyrun"`, solid with no label;
 `sysvinit-inittab_2.88dsf.bb` has `RDEPENDS:${PN} = "ttyrun"` because the
 generated inittab calls it.
+
+## 9. Package renaming (`debian.bbclass`)
+
+`debian.bbclass` is inherited through `INHERIT_DISTRO` in
+`meta/conf/distro/defaultsetup.conf`, so every OE-core distro has it, poky
+included, unless the distro overrides `INHERIT_DISTRO`. During `do_package` it
+renames a package that is "just a shared library" after that library's soname,
+using the Debian naming convention.
+
+### Why it is done
+
+The package name follows the library's **ABI**, not the project's name or version:
+
+- **An ABI break changes the package name.** When upstream bumps the soname
+  (`libssl.so.1.1` → `libssl.so.3`), the package changes from `libssl1.1` to
+  `libssl3`. A package manager then sees a *new* package, not an upgrade that
+  silently replaces a library that installed binaries still link against.
+  Because the files differ (`.so.1.1` vs `.so.3`), both versions can be
+  installed side by side until nothing needs the old one. This matters on
+  devices updated from package feeds (`package-management` in `IMAGE_FEATURES`).
+- **Dependencies name the ABI.** `openssl-bin` requires `libcrypto3 >= 3.5.8`,
+  which says exactly which ABI it was linked against.
+- **ABI breaks show up in package lists.** `buildhistory-diff` reports
+  `libfoo1 was removed` / `libfoo2 was added` instead of a version change.
+
+It has to happen during packaging, not in the recipe, because the soname is
+only known once the library is built. The class reads it with `objdump -p`.
+
+### Rules
+
+The class checks each package in `AUTO_LIBNAME_PKGS` (default: all of
+`${PACKAGES}`). A package is renamed only if all of these are true:
+
+1. It has files directly in `${libdir}` or `${base_libdir}` (subdirectories
+   such as `/usr/lib/engines-3` do not count).
+2. It has **no** files in `${bindir}`, `${sbindir}`, `${base_bindir}` or `${base_sbindir}`.
+3. The `lib*.so*` files in it have **exactly one** `SONAME`. If there are
+   several, `LEAD_SONAME` (a regex) must select exactly one; otherwise you get
+   `NOTE: Multiple libraries (...) found and LEAD_SONAME not defined` and no rename.
+
+The new name comes from the soname:
+
+| SONAME | New package name | Rule |
+|---|---|---|
+| `libwhydemo.so.1` | `libwhydemo1` | name + major version |
+| `libcrypto.so.3` | `libcrypto3` | |
+| `libz.so.1` | `libz1` | |
+| `libfoo2.so.3` | `libfoo2-3` | `-` inserted when the name already ends in a digit |
+
+**Sibling packages are renamed too.** Each other package of the recipe has the
+original package name replaced by the soname without its version (`libz`,
+`libcrypto`), if its name contains it:
+
+| Recipe | Result |
+|---|---|
+| `zlib` | `zlib` → `libz1`, `zlib-dev` → `libz-dev`, `zlib-doc` → `libz-doc` |
+| `libwhydemo` | `libwhydemo` → `libwhydemo1`; `libwhydemo-dev` unchanged (already `libwhydemo`) |
+| `openssl` | `libcrypto` → `libcrypto3`; `openssl-dev` unchanged (does not contain `libcrypto`) |
+| `glibc` | `glibc` → `libc6`, `glibc-dev` → `libc6-dev`, set explicitly with `PKG:` in `glibc-package.inc`, not by the class |
+
+Every rename is logged:
+
+```console
+$ grep 'debian: renaming' tmp/work/*/openssl/*/temp/log.do_package
+NOTE: debian: renaming libcrypto to libcrypto3
+NOTE: debian: renaming libssl to libssl3
+```
+
+### How dependencies still resolve
+
+Recipes keep writing the **original** names (`RDEPENDS = "libcrypto"`). Two
+mechanisms connect them to the renamed packages:
+
+1. **The renamed package provides its old name.** `add_rprovides()` adds
+   `RPROVIDES:<pkg> = "<pkg> (=<PKGV>)"`.
+2. **Dependency lists are translated when the package is written.**
+   `do_package_write_rpm` calls `mapping_rename_hook()` (`meta/lib/oe/packagedata.py`),
+   which looks every dependency up in pkgdata and substitutes the renamed name.
+   That needs the dependency's pkgdata to exist already, which is why
+   `do_package_write_rpm` depends on `do_packagedata` of runtime dependencies
+   and circular `RDEPENDS` do not work.
+
+### Full example: openssl (a CLI tool plus two libraries)
+
+The openssl recipe splits its output so the libraries can be renamed and
+installed without the tool:
+
+```bitbake
+inherit lib_package ...    # adds ${PN}-bin before ${PN}; FILES:${PN}-bin = "${bindir}/* ${sbindir}/*"
+
+PACKAGES =+ "libcrypto libssl openssl-conf ${PN}-engines ${PN}-misc ${PN}-ossl-module-legacy ${PN}-ossl-module-fips"
+
+FILES:libcrypto = "${libdir}/libcrypto${SOLIBS}"
+FILES:libssl = "${libdir}/libssl${SOLIBS}"
+FILES:${PN}-engines = "${libdir}/engines-3"
+FILES:${PN}-misc = "${libdir}/ssl-3/misc ${bindir}/c_rehash"
+
+RRECOMMENDS:libcrypto += "openssl-conf ${PN}-ossl-module-legacy"
+RDEPENDS:${PN}-bin += "openssl-conf"
+```
+
+What the class decided for each package. The `libs`/`bins` values are from the
+`DEBUG: LIBNAMES: pkg ... libs N bins N sonames [...]` lines in
+`log.do_package`:
+
+| Package (recipe name) | Final name | Contents | libs / bins / SONAMEs | Result |
+|---|---|---|---|---|
+| `libcrypto` | **`libcrypto3`** | `/usr/lib/libcrypto.so.3` | 1 / 0 / `libcrypto.so.3` | renamed |
+| `libssl` | **`libssl3`** | `/usr/lib/libssl.so.3` | 1 / 0 / `libssl.so.3` | renamed |
+| `openssl-bin` | `openssl-bin` | `/usr/bin/openssl` | 0 / 1 / – | kept: no library |
+| `openssl` | `openssl` | `/usr/lib/ssl-3/ct_log_list.cnf*` | 0 / 0 / – | kept |
+| `openssl-dev` | `openssl-dev` | headers, `libcrypto.so`/`libssl.so` symlinks, `.pc` | 1 / 0 / none | kept: the dev symlinks point into other packages, so no SONAME is read |
+| `openssl-engines` | `openssl-engines` | `/usr/lib/engines-3/*.so` | 0 / 0 / – | kept: subdirectory of `${libdir}` |
+| `openssl-misc` | `openssl-misc` | `c_rehash` | 0 / 1 / – | kept |
+| `openssl-conf` | `openssl-conf` | `/etc/ssl/openssl.cnf`, `/usr/lib/ssl-3/openssl.cnf*` | 0 / 0 / – | kept |
+
+Dependencies as the recipe and pkgdata see them (original names) and as the
+rpm sees them (translated). `rpm` here is the image's native sysroot copy;
+ignore its `cannot open Packages database` warning:
+
+```console
+$ oe-pkgdata-util read-value RDEPENDS openssl-bin
+openssl-conf glibc (>= 2.43+git0+1c9988e525) libcrypto (>= 3.5.8) libssl (>= 3.5.8)
+
+$ RPM=tmp/work/qemuarm64-poky-linux/core-image-minimal/1.0/recipe-sysroot-native/usr/bin/rpm
+$ $RPM -qp --requires tmp/deploy/rpm/cortexa57/openssl-bin-3.5.8-r0.cortexa57.rpm   # trimmed
+libc6 >= 2.43+git0+1c9988e525
+libcrypto.so.3()(64bit)
+libcrypto3 >= 3.5.8
+libssl.so.3()(64bit)
+libssl3 >= 3.5.8
+openssl-conf
+
+$ $RPM -qp --provides tmp/deploy/rpm/cortexa57/libcrypto3-3.5.8-r0.cortexa57.rpm    # trimmed
+libcrypto = 3.5.8              # old name, from add_rprovides()
+libcrypto.so.3()(64bit)        # soname, from the rpm dependency generator
+libcrypto3 = 3.5.8-r0          # its own (new) name
+```
+
+`libcrypto (>= 3.5.8)` was not written in the recipe: shlibdeps added it
+because `/usr/bin/openssl` links `libcrypto.so.3`, and the rpm writer
+translated it to `libcrypto3 >= 3.5.8`.
+
+In this image, `kmod` links `libcrypto.so.3` (section 8, example C), so the
+graph shows how renaming and the package split play out:
+
+```console
+$ grep -E -- '"libcrypto3" ->|-> "libcrypto3"' $BH/depends.dot | grep -v 'label="lib\|"libc6"\|/bin/sh'
+"kmod" -> "libcrypto3" [label=">= 3.5.8"]
+"libcrypto3" -> "openssl-conf" [style=dotted]
+"libcrypto3" -> "openssl-ossl-module-legacy" [style=dotted]
+"libkmod2" -> "libcrypto3" [label=">= 3.5.8"]
+```
+
+- `kmod`'s dependency on `libcrypto` became `libcrypto3`, and only the library
+  (plus the recommended `openssl-conf`) is installed. `openssl-bin` and `libssl3`
+  are not, because nothing requires them.
+- `openssl-ossl-module-legacy` is **not** installed although the edge exists:
+  the package is empty in this build, so it was never created
+  (`tmp/pkgdata/qemuarm64/runtime/openssl-ossl-module-legacy.packaged` is
+  missing). A recommendation of a package that does not exist is ignored.
+
+**What the split buys.** If `libcrypto.so.3` were in the same package as
+`/usr/bin/openssl`, rule 2 would fail: no rename, the package would stay
+`openssl`, and `kmod` would pull the CLI tool into the image just to get the
+library. If `libcrypto.so.3` and `libssl.so.3` shared one package, rule 3
+would fail (two SONAMEs) unless the recipe set `LEAD_SONAME`. That is why
+library recipes inherit `lib_package` or list their libraries as separate
+packages with `PACKAGES =+`.
+
+### Where each name appears
+
+| Place | Name used |
+|---|---|
+| Recipe metadata, `bitbake-getvar`, the `RDEPENDS` you write | Original (`libcrypto`) |
+| `oe-pkgdata-util read-value`, `find-path`, `tmp/pkgdata/*/runtime/<pkg>` | Original |
+| rpm files, dnf, `log.do_rootfs`, image manifest, buildhistory, `BAD_RECOMMENDATIONS`, `PACKAGE_EXCLUDE` | **Renamed** (`libcrypto3`) |
+
+```sh
+oe-pkgdata-util lookup-pkg libcrypto        # -> libcrypto3
+oe-pkgdata-util lookup-pkg -r libcrypto3    # -> libcrypto
+ls -l tmp/pkgdata/qemuarm64/runtime-reverse/libcrypto3   # symlink -> ../runtime/libcrypto
+```
+
+### Pitfalls
+
+- **Grepping image-side names in pkgdata, or the reverse, silently finds
+  nothing.** Translate with `lookup-pkg` first.
+- **The name can change between builds.** It comes from the built files, not
+  the recipe. A version bump that changes the soname turns `libfoo1` into
+  `libfoo2`; `buildhistory-diff` shows one removed and one added.
+- **Adding a binary to a library package stops the renaming.** It falls back
+  to its original name, and a `BAD_RECOMMENDATIONS` / `PACKAGE_EXCLUDE` entry
+  using the renamed name quietly stops matching.
+- **A second library in the package also stops the renaming**, unless
+  `LEAD_SONAME` picks one.
+
+### Controlling it
+
+| Goal | How |
+|---|---|
+| Keep the original name for one package | `DEBIAN_NOAUTONAME:<pkg> = "1"` |
+| Choose the name yourself | `DEBIANNAME:<pkg> = "..."`, or set `PKG:<pkg>` as glibc does |
+| Pick the soname when a package has several | `LEAD_SONAME = "libfoo.so"` |
+| Turn it off for the whole distro | Remove `debian` from `INHERIT_DISTRO`. This renames packages distro-wide, so lists that use the renamed names must be updated |
 
 ## Demo recipes and how to reproduce
 
