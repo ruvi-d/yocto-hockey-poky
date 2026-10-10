@@ -1,12 +1,14 @@
 # Debugging unexpected rebuilds: sstate and task signatures, hands-on
 
-A throwaway layer for learning why BitBake reruns a task instead of reusing
+A small demo layer (`/workspace/yocto-hockey-poky/meta-sstate-demo`) for learning why BitBake reruns a task instead of reusing
 shared state (sstate). Every command and output below was run on the
 `hockey-qemuarm64-poky` build (wrynose, BitBake 2.18, `OEEquivHash`); hashes
 are shortened to `…`.
 
 ```
 meta-sstate-demo/
+├── README.md                      # this guide
+├── whopulls.py                    # traces why a variable is in a task's hash (experiment 6)
 ├── conf/layer.conf
 ├── conf/other-machine.conf        # used in experiment 8
 └── recipes-demo/
@@ -172,7 +174,8 @@ Run everything from the build directory, in a BitBake terminal or after
 cd /workspace/yocto-hockey-poky/bitbake-builds/hockey-qemuarm64-poky/build
 . ./init-build-env
 
-bitbake-layers add-layer ../meta-sstate-demo
+LAYER=/workspace/yocto-hockey-poky/meta-sstate-demo   # used by every command below
+bitbake-layers add-layer $LAYER                       # no-op if already added
 
 # Helper: print only the sstate summary, errors, and the demo's task lines.
 bbt() { bitbake "$@" 2>&1 | grep -E 'Sstate summary|^ERROR|recipe sstate-demo.*(Succeeded|Failed)' \
@@ -344,7 +347,7 @@ changes the hash, but it can't change the output:
 
 ```sh
 sed -i 's|^do_compile() {|do_compile() {\n    # a harmless comment|' \
-    ../meta-sstate-demo/recipes-demo/sstate-demo/sstate-demo_1.0.bb
+    $LAYER/recipes-demo/sstate-demo/sstate-demo_1.0.bb
 bbt sstate-demo
 ```
 ```
@@ -366,14 +369,14 @@ of built. In a large build this saves a lot of work, for example when a
 `-native` tool changes without changing its output.
 
 Undo the comment before continuing:
-`sed -i '/# a harmless comment/d' ../meta-sstate-demo/recipes-demo/sstate-demo/sstate-demo_1.0.bb`
+`sed -i '/# a harmless comment/d' $LAYER/recipes-demo/sstate-demo/sstate-demo_1.0.bb`
 
 ### Experiment 6: the timestamp trap (and where `vardepsexclude` must go)
 
 Embed the build time:
 
 ```sh
-R=../meta-sstate-demo/recipes-demo/sstate-demo/sstate-demo_1.0.bb
+R=$LAYER/recipes-demo/sstate-demo/sstate-demo_1.0.bb
 echo 'DEMO_EXTRA_CFLAGS = "-DBUILD_TIME=${DATETIME}"' >> $R
 bbt sstate-demo
 ```
@@ -383,9 +386,22 @@ ERROR: When reparsing …/sstate-demo_1.0.bb:do_compile, the basehash value chan
 ERROR: sstate-demo-1.0-r0 do_compile: Taskhash mismatch 5f6b9198… versus acb57219… for …:do_compile
 ```
 
-The server parsed the recipe at one second, and the worker re-parsed it at
-another before running the task. `DATETIME` differed, so the hashes
-disagreed.
+Each task is checked twice, by two different processes using two
+different clock readings:
+
+1. **The server parses the recipe.** `DATE`/`TIME` were set with `:=` in
+   `bitbake.conf` when the *configuration* was parsed, call it time T1.
+   `DATETIME` expands to T1 and is hashed into `do_compile`'s basehash.
+2. **The build starts.** Just before scheduling tasks,
+   `cooker.buildSetVars()` resets `DATE`/`TIME` to *now* (T2), and passes
+   them to the workers.
+3. **The worker re-parses the recipe** before running the task, with
+   `DATE`/`TIME` = T2, and recomputes the basehash. In `siggen.py`
+   `_build_data()`, T1 ≠ T2, so you get "When reparsing … the basehash value
+   changed".
+
+The task still runs and succeeds; bitbake just exits non-zero because of
+the errors.
 
 Run it again:
 
@@ -396,10 +412,35 @@ bbt sstate-demo
 Sstate summary: Wanted 58 Local 58 Mirrors 0 Missed 0 Current 275 (100% match, 100% complete)
 ```
 
-**No errors and no rebuild.** `DATE` and `TIME` are in
-`BB_HASHCONFIG_IGNORE_VARS`, so they don't invalidate the parse cache, and
-the cached parse keeps the old timestamp. The problem only comes back when
-something forces a re-parse. That's why this bug seems to come and go:
+**No errors and no rebuild.** Two things combine to cause this:
+
+- **The parse cache is reused.** Parsed recipe info, including every
+  task's basehash, is stored in `tmp/cache/…/bb_cache.dat.<config-hash>`.
+  The `<config-hash>` covers the whole configuration *except*
+  `BB_HASHCONFIG_IGNORE_VARS`, which includes `DATE` and `TIME`, so the clock
+  moving doesn't select a new cache file. Within that file, a recipe is
+  re-parsed only if its own mtime or the mtime of a file it depends on
+  changed. Neither happened, so run 2 got run 1's basehash, which still has
+  run 1's timestamp in it.
+- **Nothing ran, so nothing was checked.** That cached hash matches the
+  stamps run 1 wrote, so every task is "Current". The determinism check only
+  happens when a worker re-parses to *execute* a task, so it never fired.
+
+The timestamp is frozen until the next re-parse of this recipe, which
+happens when:
+
+- the `.bb`, a `.bbappend`, or an `.inc`/`.bbclass` it uses is edited or
+  touched (that includes `git pull` of a layer);
+- any configuration that isn't ignored changes (local.conf, a layer added,
+  `-r`/`-R` files, a different MACHINE), which gives a new config hash and a
+  re-parse of every recipe;
+- `tmp/cache` is deleted, or a fresh build directory is used (every CI
+  run).
+
+Each re-parse gives a new timestamp, which means a new hash, a rebuild, the
+error again, **and a new sstate object nobody will ever reuse**. On your
+machine the bug seems to come and go with unrelated edits. On CI, with a
+fresh TMPDIR each time, it rebuilds every single run. Reproduce it:
 
 ```sh
 touch $R; bbt sstate-demo                       # errors + rebuild again
@@ -410,19 +451,57 @@ basehash changed from f27b546b… to 27f2ad87…
 Variable TIME value changed from '162548' to '162615'
 ```
 
-`diffsigs` blames **`TIME`**, not your variable. To trace who pulls it in:
+`diffsigs` blames **`TIME`**, not your variable. `do_compile` never
+mentions `TIME`, so how did it get into the hash? The dump has what you need
+to work it out:
+
+| Dump line | What it tells you |
+|---|---|
+| `Task dependencies: [...]` | **Every** variable in the hash, flattened. `TIME` is in it, but this doesn't say *why*. |
+| `List of dependencies for variable X is [...]` | **One edge** of the graph: the variables X's value references *directly*. (After `vardepsexclude` has been applied to X.) |
+| `Variable do_compile value is ...` | The task body. Its `${...}` references are the first edge. There is **no** "List of dependencies" line for the task itself. |
+
+Find the cause by walking the edges **backwards** from the blamed variable:
 
 ```sh
-bitbake-dumpsig $(ls -t tmp/stamps/cortexa57-poky-linux/sstate-demo/1.0.do_compile.sigdata.* | head -1) \
-  | grep -E 'List of dependencies for variable (DEMO_EXTRA_CFLAGS|DATETIME|TIME)'
-```
-```
-List of dependencies for variable DATETIME is ['DATE', 'TIME']
-List of dependencies for variable DEMO_EXTRA_CFLAGS is ['DATETIME']
-List of dependencies for variable TIME is []
+F=$(ls -t tmp/stamps/cortexa57-poky-linux/sstate-demo/1.0.do_compile.sigdata.* | head -1)
+bitbake-dumpsig $F > /tmp/sig.txt
+
+grep -E "^List of dependencies for variable .* is .*'TIME'" /tmp/sig.txt
+#   List of dependencies for variable DATETIME is ['DATE', 'TIME']        <- DATETIME uses TIME
+grep -E "^List of dependencies for variable .* is .*'DATETIME'" /tmp/sig.txt
+#   List of dependencies for variable DEMO_EXTRA_CFLAGS is ['DATETIME']   <- DEMO_EXTRA_CFLAGS uses DATETIME
+grep -E "^List of dependencies for variable .* is .*'DEMO_EXTRA_CFLAGS'" /tmp/sig.txt
+#   (nothing: no other variable uses it, so look at the task body)
+grep '^Variable do_compile value is' /tmp/sig.txt
+#   Variable do_compile value is     ${CC} ... ${DEMO_EXTRA_CFLAGS} ...    <- the task uses it
 ```
 
-The chain is `do_compile → DEMO_EXTRA_CFLAGS → DATETIME → TIME`.
+The chain is `do_compile → DEMO_EXTRA_CFLAGS → DATETIME → TIME`. The
+**last variable before the task** (`DEMO_EXTRA_CFLAGS`) is the one making the
+direct reference, so that's where `vardepsexclude` must go, as fixes A and B
+below show.
+
+`whopulls.py` in this layer does the same backward walk and prints every
+path:
+
+```sh
+bitbake-dumpsig $F | python3 $LAYER/whopulls.py TIME
+#   do_compile -> DEMO_EXTRA_CFLAGS -> DATETIME -> TIME
+```
+
+A variable can reach a task by more than one path, and not always through a
+`${...}` in the body. Shell tasks also depend on every **exported**
+variable:
+
+```
+$ ... | whopulls.py DEBUG_PREFIX_MAP_EXTRA
+do_compile -> CFLAGS -> TARGET_CFLAGS -> DEBUG_PREFIX_MAP -> DEBUG_PREFIX_MAP_EXTRA
+(exported to task env) -> CXXFLAGS -> TARGET_CXXFLAGS -> TARGET_CFLAGS -> DEBUG_PREFIX_MAP -> DEBUG_PREFIX_MAP_EXTRA
+```
+
+When there are several paths, you have to cut **each** of them; a
+`vardepsexclude` on just one path leaves the others in the hash.
 
 **Fix A, the commonly quoted one, doesn't work here:**
 
@@ -452,14 +531,47 @@ strings tmp/work/cortexa57-poky-linux/sstate-demo/1.0/image/usr/bin/sstate-demo 
 ```
 
 That's correct sstate behaviour, but it's a lie if you expected "time of
-this build". The real fixes:
+this build". OE-core makes the same trade-off on purpose: `os-release` has
+`BUILD_ID[vardepsexclude] = "DATETIME"`, so its build ID is the time the
+package was last *really* built.
 
-- Don't embed build times.
-- Use `SOURCE_DATE_EPOCH` for reproducible timestamps.
-- If the value truly must be fresh, accept that the task can't be cached.
+**Fix C: if the value truly must be fresh**, keep fix B and add `nostamp`:
+
+```sh
+echo 'do_compile[nostamp] = "1"' >> $R
+bbt sstate-demo; bbt sstate-demo     # both runs: do_compile ... do_package_write_rpm, no errors
+```
+
+The two lines solve two different problems:
+
+- **`vardepsexclude` fixes the mismatch error.** The clock is no longer in
+  the hash, so the server and the worker agree.
+- **`nostamp` makes the value fresh.** The task runs every build no matter
+  what its hash is.
+
+The value really is current, even with a cached parse. The worker
+re-parses the recipe with `DATE`/`TIME` set to *this* build's start time, so
+every task in one build sees the same time. Don't use
+`BB_HASH_IGNORE_MISMATCH = "1"` instead: it hides the error, but the value
+stays frozen.
+
+**The cost:** a `nostamp` task gives everything downstream a random taint,
+so all of it reruns every build and is never restored from sstate. That
+includes `do_rootfs` of any image containing the package. Each run also
+writes new sstate objects that nothing will ever reuse. Keep the
+time-dependent part as late and as small as possible:
+
+- **Prefer an identifier over the clock.** `SOURCE_DATE_EPOCH` (time of the
+  last source change), a version or a git hash is deterministic and fully
+  cacheable.
+- **Don't compile the time into a binary.** Have the program read it at
+  runtime from a file such as `/etc/build-time`, so the expensive recipe
+  stays cacheable.
+- **Write that file in a tiny dedicated recipe with a `nostamp` task, or at
+  image level** with a `ROOTFS_POSTPROCESS_COMMAND` function.
 
 Clean up:
-`sed -i '/^DEMO_EXTRA_CFLAGS = "-DBUILD_TIME/d; /^DEMO_EXTRA_CFLAGS\[vardepsexclude\]/d' $R`
+`sed -i '/^DEMO_EXTRA_CFLAGS = "-DBUILD_TIME/d; /^DEMO_EXTRA_CFLAGS\[vardepsexclude\]/d; /^do_compile\[nostamp\]/d' $R`
 
 ### Experiment 7: a forced task leaves a taint that persists
 
@@ -486,11 +598,11 @@ until the taint is cleared with `bitbake -c clean sstate-demo`. If someone ran
 across every machine. Make it reference `MACHINE`:
 
 ```sh
-D=../meta-sstate-demo/recipes-demo/sstate-demo-data/sstate-demo-data_1.0.bb
+D=$LAYER/recipes-demo/sstate-demo-data/sstate-demo-data_1.0.bb
 sed -i 's|echo "shared data"|echo "shared data, built for ${MACHINE}"|' $D
 
 bitbake -S none sstate-demo-data                                            # qemuarm64
-bitbake -r ../meta-sstate-demo/conf/other-machine.conf -S none sstate-demo-data   # qemux86-64
+bitbake -r $LAYER/conf/other-machine.conf -S none sstate-demo-data   # qemux86-64
 bitbake-diffsigs -t sstate-demo-data do_install
 ```
 ```
@@ -513,9 +625,10 @@ Undo: `sed -i 's|, built for ${MACHINE}||' $D`
 ### Teardown
 
 ```sh
-bitbake-layers remove-layer ../meta-sstate-demo
-# optional: drop the demo's objects from the shared cache
-# bitbake -c cleansstate sstate-demo sstate-demo-data   (run BEFORE remove-layer)
+# Optional: drop the demo's objects from the shared cache (needs the layer still added).
+bitbake -c cleansstate sstate-demo sstate-demo-data
+
+bitbake-layers remove-layer $LAYER
 ```
 
 ---
@@ -525,7 +638,7 @@ bitbake-layers remove-layer ../meta-sstate-demo
 | Culprit | What you see | Diagnose | Fix |
 |---|---|---|---|
 | Changed config value (local.conf, distro, machine) | `Variable X value changed` | `-S printdiff` | Intended? Fine. If not, find it with `bitbake-getvar -r R X` (history) |
-| `DATETIME`/`DATE`/`TIME` | "metadata is not deterministic" errors that come and go with re-parses; diffsigs blames `TIME` | `dumpsig` → `List of dependencies for variable` | `VAR[vardepsexclude] += "DATETIME"` on the variable that **directly** references it, or better, `SOURCE_DATE_EPOCH` |
+| `DATETIME`/`DATE`/`TIME` | "metadata is not deterministic" errors that come and go with re-parses; diffsigs blames `TIME` | `dumpsig` → `List of dependencies for variable` | `VAR[vardepsexclude] += "DATETIME"` on the variable that **directly** references it, or better, `SOURCE_DATE_EPOCH`. Add `[nostamp]` only if it must be fresh (experiment 6, fix C) |
 | `AUTOREV` / `SRCREV = "${AUTOREV}"` | `do_fetch` hash changes whenever upstream moves; `SRCREV`/`SRCPV` diff | `diffsigs -t R do_fetch` | Pin `SRCREV` for releases |
 | Machine values in `allarch` | Same recipe rebuilds when switching MACHINE | `-S none` per machine + `diffsigs` | Remove the reference or use `MACHINE_ARCH` |
 | Absolute paths (`${TOPDIR}`, `$HOME`) in a variable | sstate never reused across build dirs/hosts; diff shows paths | Compare `-S none` sigdata from both hosts | Use `${WORKDIR}`/`${S}` etc. (already ignored), or `vardepsexclude` on the path var |
