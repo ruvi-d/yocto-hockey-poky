@@ -225,25 +225,108 @@ is usually a `PACKAGECONFIG` option of the parent recipe (3d).
 
 ### 3c. Virtual names: `RPROVIDES` and `VIRTUAL-RUNTIME_*`
 
-A dashed edge with a plain-name label means the parent required a name, and
-some other package `RPROVIDES` it:
+A dashed edge with a plain-name label means the parent required a **name**
+that is not the name of the package that got installed. Three kinds of thing
+are involved, and they are easy to mix up:
+
+- **Recipe**: a `.bb` file. It is built and produces packages.
+- **Package**: an output of a recipe (`.rpm`); what dnf installs.
+- **Runtime name**: any word in an `RDEPENDS`/`RRECOMMENDS`. It is satisfied
+  either by a package with that name, or by a package that lists the name in
+  its `RPROVIDES`.
+
+Worked through for `eudev` in this image:
+
+| Name | What it is | Defined in |
+|---|---|---|
+| `eudev` | **recipe** | `meta/recipes-core/udev/eudev_3.2.14.bb` |
+| `eudev`, `eudev-hwdb`, `libudev`, `eudev-dev`, … | **packages** made by recipe `eudev` (`oe-pkgdata-util list-pkgs -p eudev`) | same recipe |
+| `udev` | **runtime name only**. No package is called `udev` in this build; package `eudev` claims the name with `RPROVIDES:${PN} = "hotplug udev"` | `eudev_3.2.14.bb:77` |
+| `packagegroup-core-boot` | recipe, and the one package it makes | `meta/recipes-core/packagegroups/packagegroup-core-boot.bb` |
+| `VIRTUAL-RUNTIME_dev_manager` | an ordinary **variable** whose value is a runtime name (`udev`) | distro config, see step 3 |
+
+**Step 1: the graph shows the name and the package that satisfied it.**
 
 ```console
 $ grep -- '-> "eudev"' $BH/depends.dot
 "packagegroup-core-boot" -> "eudev" [label="udev"] [style=dashed]
+```
+
+Read it as: package `packagegroup-core-boot` requires runtime name `udev`
+(label); package `eudev` satisfied it (dashed = through `RPROVIDES`).
+
+**Step 2: confirm which package provides the name.**
+
+```console
 $ oe-pkgdata-util read-value RPROVIDES eudev
 hotplug udev
+$ grep -lE '^RPROVIDES:.*[: ]udev( |$)' tmp/pkgdata/qemuarm64/runtime/*    # who else provides "udev"?
+tmp/pkgdata/qemuarm64/runtime/eudev
+```
+
+**Step 3: find where the parent's `udev` comes from.** The word `udev` does not
+appear in `packagegroup-core-boot.bb`. Compare the final value of its
+`RDEPENDS` with the value before variables are expanded; both are in the same
+`bitbake-getvar` output (trimmed here):
+
+```console
+$ bitbake-getvar -r packagegroup-core-boot RDEPENDS:packagegroup-core-boot
+# pre-expansion value:
+#   "base-files base-passwd ${VIRTUAL-RUNTIME_base-utils} ... ${VIRTUAL-RUNTIME_init_manager} ${VIRTUAL-RUNTIME_dev_manager} ..."
+RDEPENDS:packagegroup-core-boot="base-files base-passwd busybox ... sysvinit udev ..."
+```
+
+`udev` sits where `${VIRTUAL-RUNTIME_dev_manager}` was, so the recipe depends
+on whatever that variable holds. That is the link from the package graph to
+the variable. Next, where is the variable set?
+
+```console
 $ bitbake-getvar -r packagegroup-core-boot VIRTUAL-RUNTIME_dev_manager
 #   set .../meta/conf/distro/include/init-manager-sysvinit.inc:6
 #     [_defaultval] "udev"
 ```
 
-So: `packagegroup-core-boot` RDEPENDS on `${VIRTUAL-RUNTIME_dev_manager}`, the
-sysvinit init manager config sets that to `udev`, and `eudev` provides `udev`.
-Change the provider by setting the `VIRTUAL-RUNTIME_*` variable in a distro
-config, or with `PREFERRED_RPROVIDER_<name>` when several recipes provide the
-same name (bitbake warns about multiple providers, and which one gets
-installed is then up to the package manager).
+`init-manager-sysvinit.inc` is used because poky sets
+`INIT_MANAGER = "sysvinit"` (`meta-poky/conf/distro/poky.conf:68-69`) and
+`defaultsetup.conf:21` does `require conf/distro/include/init-manager-${INIT_MANAGER}.inc`.
+
+The whole chain:
+
+```text
+poky.conf                      INIT_MANAGER = "sysvinit"
+defaultsetup.conf              require init-manager-sysvinit.inc
+init-manager-sysvinit.inc      VIRTUAL-RUNTIME_dev_manager ??= "udev"
+packagegroup-core-boot.bb      RDEPENDS:${PN} = "... ${VIRTUAL-RUNTIME_dev_manager} ..."   -> requires "udev"
+eudev_3.2.14.bb                RPROVIDES:${PN} = "hotplug udev"                              -> package eudev provides it
+dnf                            installs package eudev
+```
+
+**What `VIRTUAL-RUNTIME_*` is.** A naming convention, not a BitBake feature.
+Generic recipes such as packagegroups depend on `${VIRTUAL-RUNTIME_<role>}`
+instead of a fixed package, so a distro can choose the implementation of a role
+without editing those recipes. The same `RDEPENDS` line uses several of them;
+in this build `VIRTUAL-RUNTIME_init_manager` = `sysvinit`,
+`VIRTUAL-RUNTIME_login_manager` = `busybox`, `VIRTUAL-RUNTIME_base-utils` =
+`busybox`, `VIRTUAL-RUNTIME_update-alternatives` = `update-alternatives-opkg`.
+With `INIT_MANAGER = "systemd"`, `init-manager-systemd.inc` sets
+`VIRTUAL-RUNTIME_dev_manager` to `systemd`; `init-manager-mdev-busybox.inc`
+sets it to `busybox-mdev`. Whenever a word in an `RDEPENDS` is not written in
+the recipe, look for a variable in the pre-expansion value.
+
+**Changing it.** There are two separate knobs:
+
+| You want to change | Set | Example |
+|---|---|---|
+| Which runtime name the recipe requires | the `VIRTUAL-RUNTIME_*` variable, in a distro config | `VIRTUAL-RUNTIME_dev_manager = "busybox-mdev"` |
+| Which **recipe** supplies a name that several recipes provide | `PREFERRED_PROVIDER_<name>` (build time, `PROVIDES`) / `PREFERRED_RPROVIDER_<name>` (runtime, `RPROVIDES`) | `default-providers.inc` sets `PREFERRED_PROVIDER_udev` to `systemd` if `systemd` is in `DISTRO_FEATURES`, otherwise `eudev` |
+
+Recipe `eudev` also has `PROVIDES = "udev"`, the build-time counterpart used
+when another recipe has `DEPENDS = "udev"`. Recipe `systemd` provides `udev`
+too (and makes a package literally named `udev`), but here it is skipped
+because poky lacks the `systemd` distro feature, so `eudev` is the only
+provider (`bitbake-layers show-recipes eudev systemd`). When several providers
+are buildable and no preference is set, bitbake warns, and which one dnf
+installs is no longer under your control.
 
 ### 3d. `PACKAGECONFIG` and `DISTRO_FEATURES`
 
