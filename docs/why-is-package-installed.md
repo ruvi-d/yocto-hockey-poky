@@ -166,17 +166,116 @@ no edges at all: it was installed directly (section 4).
 
 ### Edge legend for `depends.dot`
 
-buildhistory asks the package manager what each installed package requires
-and how that requirement was satisfied:
+#### One edge = one requirement line in an rpm
 
-| Edge                                   | Meaning                                                                                   | Example                                                     |
-|----------------------------------------|-------------------------------------------------------------------------------------------|-------------------------------------------------------------|
-| solid, no label                        | Requires this package **by name**                                                         | `"packagegroup-whydemo" -> "whydemo-app"`                   |
-| solid, `label=">= x"`                  | Versioned requirement by name. Usually **added automatically** from shlibs, not typed in a recipe | `"whydemo-app" -> "libwhydemo1" [label=">= 1.0"]`    |
-| dashed, soname label                   | Satisfied by a library the package provides (automatic shlib dependency)                  | `[label="libwhydemo.so.1()(64bit)"] [style=dashed]`         |
-| dashed, path label                     | Satisfied by a file the package provides (e.g. a script interpreter or postinst shell)    | `"base-passwd" -> "busybox" [label="/bin/sh"]`              |
-| dashed, plain-name label               | Satisfied by an **`RPROVIDES`** (virtual name); the label is the name that was required   | `"whydemo-app" -> "whydemo-plugin-foo" [label="whydemo-plugin"]` |
-| dotted                                 | `RRECOMMENDS` (weak). **The target may not be installed** (see section 5)                 | `"whydemo-app" -> "whydemo-extras" [style=dotted]`          |
+Every rpm carries a list of **requirements** (`Requires`) and
+**recommendations** (`Recommends`). Each entry is a plain string, and there are
+several kinds of string:
+
+| Kind of string | Example |
+|---|---|
+| a package name | `update-alternatives-opkg` |
+| a package name with a version | `libwhydemo1 >= 1.0` |
+| a shared library (soname) | `libwhydemo.so.1()(64bit)` |
+| a file path | `/bin/sh` |
+| a virtual name (`RPROVIDES`) | `whydemo-plugin`, `udev` |
+| another capability | `rtld(GNU_HASH)`, `group(shutdown)` |
+
+You can see the raw list for any package with `rpm -qp --requires` /
+`--recommends` (section 9 shows the `rpm` binary to use).
+
+At the end of `do_rootfs`, buildhistory runs
+`dnf repoquery --installed --queryformat '%{requires} %{recommends}'` and turns
+**each string into one edge** (code: `RpmPM.list_installed()` in
+`meta/lib/oe/package_manager/rpm/__init__.py` and `format_pkg_list()` in
+`meta/lib/oe/utils.py`):
+
+1. **Recommendation** → **dotted** edge to the recommended name, taken
+   literally. buildhistory does *not* check that it was installed.
+2. **Requirement whose string some installed package provides** (looked up in
+   the `RPROVIDES` and `FILERPROVIDES` entries of pkgdata) → **dashed** edge to
+   that provider, with the string as the label. If several installed packages
+   provide it, there is one dashed edge per provider.
+3. **Any other requirement** → **solid** edge to the first word of the string,
+   taken literally. A version constraint becomes the label. In practice that
+   word is a package name.
+
+So the style tells you **how the target was matched**: dotted = recommended,
+solid = required by its package name, dashed = required through something it
+provides. The label is the string that was required.
+
+#### Where the strings come from
+
+What you usually want is *who put the requirement there*. Some strings are
+written by people, most are generated during `do_package`:
+
+| Edge | Requirement string | Added by | Written by a person? |
+|---|---|---|---|
+| solid, no label | `whydemo-app` | `RDEPENDS` in a recipe, packagegroup or class (`update-alternatives.bbclass` adds `update-alternatives-opkg`) | yes |
+| solid, `>= x` label | `libwhydemo1 >= 1.0` | **shlibs**: `do_package` sees a binary linking a library, adds `libwhydemo (>= 1.0)` to `RDEPENDS` in pkgdata, and the rpm writer renames it (section 9). A hand-written versioned `RDEPENDS` looks the same | usually no |
+| dashed, soname label | `libwhydemo.so.1()(64bit)` | **rpmdeps**: `do_package` runs rpm's dependency generator on every file and stores the result as `FILERDEPENDS` in pkgdata. One entry per library, plus one per symbol version (`libc.so.6(GLIBC_2.34)(64bit)`) | no |
+| dashed, `rtld(GNU_HASH)` | `rtld(GNU_HASH)` | rpmdeps: the binary uses GNU hash tables, which `libc6` provides | no |
+| dashed, path label | `/bin/sh` | rpm packaging: the package has a shell scriptlet (`pkg_preinst`/`pkg_postinst`), so it requires the interpreter. A script with `#!/bin/bash` produces `/bin/bash` the same way (via rpmdeps) | no |
+| dashed, plain-name label | `whydemo-plugin`, `udev` | `RDEPENDS` naming a **virtual name** that another package lists in `RPROVIDES` (section 3c) | yes |
+| dotted | `whydemo-extras` | `RRECOMMENDS` in a recipe or class (`update-rc.d.bbclass` recommends `update-rc.d`), or the `RRECOMMENDS` field of a `PACKAGECONFIG` option (section 3d) | yes (directly or via a class) |
+| dotted, capability | `group(shutdown)` | rpm: files in the package are owned by that group (`sysvinit` ships `/sbin/halt` as `root:shutdown`). Not in `RRECOMMENDS` | no |
+
+#### Reading all edges of one package
+
+`whydemo-app` has two hand-written runtime dependencies (`RDEPENDS` on
+`whydemo-plugin`, `RRECOMMENDS` on `whydemo-extras`) and links two libraries,
+but it has nine edges (comments added):
+
+```console
+$ grep '^"whydemo-app" ->' $BH/depends.dot
+"whydemo-app" -> "libc6" [label=">= 2.43+git0+1c9988e525"]                    # shlibs: links libc
+"whydemo-app" -> "libc6" [label="libc.so.6()(64bit)"] [style=dashed]          # rpmdeps: needs libc.so.6
+"whydemo-app" -> "libc6" [label="libc.so.6(GLIBC_2.17)(64bit)"] [style=dashed]  # rpmdeps: needs that symbol version
+"whydemo-app" -> "libc6" [label="libc.so.6(GLIBC_2.34)(64bit)"] [style=dashed]  # rpmdeps: ditto
+"whydemo-app" -> "libc6" [label="rtld(GNU_HASH)"] [style=dashed]              # rpmdeps: ELF hash style
+"whydemo-app" -> "libwhydemo1" [label=">= 1.0"]                               # shlibs: links libwhydemo
+"whydemo-app" -> "libwhydemo1" [label="libwhydemo.so.1()(64bit)"] [style=dashed]  # rpmdeps: needs libwhydemo.so.1
+"whydemo-app" -> "whydemo-extras" [style=dotted]                              # RRECOMMENDS in the recipe
+"whydemo-app" -> "whydemo-plugin-foo" [label="whydemo-plugin"] [style=dashed] # RDEPENDS on a virtual name
+```
+
+So **several edges between the same two packages are one reason seen
+several times**: linking against a library always gives a solid versioned edge
+(shlibs) plus one or more dashed soname edges (rpmdeps). You can confirm both
+sources in pkgdata:
+
+```console
+$ oe-pkgdata-util read-value RDEPENDS whydemo-app       # includes the shlibs entries
+whydemo-plugin glibc (>= 2.43+git0+1c9988e525) libwhydemo (>= 1.0)
+$ grep '^FILERDEPENDS:' tmp/pkgdata/qemuarm64/runtime/whydemo-app
+FILERDEPENDS:/usr/bin/whydemo-app:whydemo-app:  libc.so.6(GLIBC_2.17)(64bit) libc.so.6(GLIBC_2.34)(64bit) libwhydemo.so.1()(64bit) libc.so.6()(64bit) rtld(GNU_HASH)
+```
+
+#### Showing only hand-written dependencies
+
+Of the 304 edges in this image's graph (demo enabled), 50 remain after dropping the
+generated kinds (soname, `rtld`, path and version labels):
+
+```sh
+grep -- ' -> ' $BH/depends.dot | grep -vE 'label="[^"]*\.so|label="rtld\(|label="/|label="[<>=]'
+```
+
+What is left are plain solid edges, plain-name dashed edges and dotted edges,
+e.g. `"packagegroup-core-boot" -> "tar"`, `"packagegroup-core-boot" -> "eudev" [label="udev"]`
+and `"dropbear" -> "xauth" [style=dotted]`. This also hides a hand-written
+*versioned* `RDEPENDS`, which is rare.
+
+#### Things the legend does not tell you
+
+- **A dotted edge's target may be missing from the image**: blocked by
+  `BAD_RECOMMENDATIONS`, never created because it was empty
+  (`openssl-ossl-module-legacy`), or not a package at all (`group(shutdown)`,
+  a capability). Check `installed-package-names.txt`.
+- **A self-edge**, such as `"busybox" -> "busybox" [label="/bin/sh"]`, means
+  the package requires something it provides itself. Ignore it.
+- **The dashed provider is buildhistory's lookup in pkgdata**, not a record of
+  dnf's choice. With one provider in the image they are the same.
+- Requirements starting with `rpmlib(` or `config(` are removed from the graph.
 
 ## 3. Find out why the parent has that dependency
 
