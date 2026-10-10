@@ -26,8 +26,16 @@ BH=buildhistory/images/qemuarm64/glibc/core-image-minimal   # used below
 
 ## 0. Turn on buildhistory
 
-Almost everything here reads buildhistory output. It is enabled in this build
-through the `meta-hockey/buildhistory` fragment
+Which packages end up in the image is decided by the package manager (dnf) in
+`do_rootfs`, not by bitbake. buildhistory is the only thing that writes dnf's
+resolved graph to disk: inside `do_rootfs` it asks the rpm database of the
+finished rootfs what every installed package requires and which package
+satisfied it, before the database is deleted (it is only kept with the
+`package-management` image feature). That graph, `depends.dot`, is what most of
+this document reads. See [Why not `bitbake -g`?](#why-not-bitbake--g) for why
+the build-time graph is not a substitute.
+
+It is enabled in this build through the `meta-hockey/buildhistory` fragment
 ([meta-hockey/conf/fragments/buildhistory.conf](../meta-hockey/conf/fragments/buildhistory.conf)):
 
 ```sh
@@ -46,11 +54,62 @@ Each image build then writes `$BH/` and commits it to git in `buildhistory/`:
 | `files-in-image.txt`          | Every file in the rootfs                                                   |
 | `image-info.txt`              | `IMAGE_INSTALL`, `IMAGE_FEATURES`, `BAD_RECOMMENDATIONS`, `PACKAGE_EXCLUDE`… as used |
 
-`buildhistory-diff` compares the last two builds (or any two git revisions),
-which is how you answer "why did this package *suddenly* appear?".
+As a side benefit, `buildhistory-diff` compares the last two builds (or any two
+git revisions), which answers "why did this package *suddenly* appear?".
 
 Without buildhistory you can still use `log.do_rootfs` and `oe-pkgdata-util`
 (section 6), but you lose the graph.
+
+### Why not `bitbake -g`?
+
+`bitbake -g <image>` writes `task-depends.dot` and `pn-buildlist` without
+building anything, and `oe-depends-dot` was written for that file (its lines
+have no edge attributes, so no `sed` is needed). It answers a different
+question, though: which **recipes** have to be **built** to produce the image.
+
+| | `bitbake -g` → `task-depends.dot` | buildhistory `depends.dot` |
+|---|---|---|
+| Question answered | What must be built | What dnf installed, and what each package required |
+| Nodes | Recipes (`glibc`, `openssl`) | Packages (`libc6`, `libcrypto3`, `tar-doc`) |
+| Computed | Before the build, from metadata | After `do_rootfs`, from the rootfs rpm database |
+| Shared-library deps found in `do_package` | No | Yes |
+| `BAD_RECOMMENDATIONS`, `PACKAGE_EXCLUDE` | Ignored | Applied |
+| Complementary packages (`*-doc`, `*-dev`) | Absent | Present |
+| Packages removed after install (`run-postinsts`) | Not known | Gone |
+| Build-only deps (`DEPENDS`, native tools, ptest, kernel) | Included, mixed with runtime edges | Absent |
+
+Measured on this image with the demo enabled: **113 target recipes are built,
+but only 33 recipes have a package in the image.** `oe-depends-dot` still gives
+each of the other 80 a convincing chain:
+
+```console
+$ bitbake -g core-image-minimal
+$ oe-depends-dot -w -k perl task-depends.dot
+core-image-minimal -> libarchive -> acl -> coreutils -> gawk -> ptest-runner -> shadow -> attr -> perl
+$ oe-depends-dot -w -k bash task-depends.dot
+core-image-minimal -> packagegroup-core-boot -> eudev -> util-linux -> kmod -> bash-completion -> bash
+$ oe-depends-dot -w -k xauth task-depends.dot      # excluded by BAD_RECOMMENDATIONS
+core-image-minimal -> packagegroup-core-ssh-dropbear -> dropbear -> xauth
+```
+
+None of `perl`, `bash` or `xauth` is installed. Those are build-time edges
+(`DEPENDS`, ptest, recommendations that bitbake builds but dnf skips), so they
+are false positives. In the other direction, packages that *are* installed are
+not found at all, because the graph only knows recipe names:
+
+```console
+$ oe-depends-dot -w -k libc6 task-depends.dot
+ERROR: Can't find key libc6 in task-depends.dot          # also tar-doc, util-linux-flock
+```
+
+Even a correct-looking chain such as `whydemo-app -> libwhydemo` is there
+because of `DEPENDS`; a static or header-only library would produce the same
+chain and install nothing.
+
+Use `bitbake -g` for "why is this recipe being **built** or fetched?" (build
+time, licenses, download failures), or as a cheap hint before a build. To
+answer "why is this package **installed**?", every result would have to be
+checked against the installed list, which needs post-rootfs data anyway.
 
 ## 1. Pin down exactly what is installed
 
@@ -316,17 +375,10 @@ Rootfs postprocess commands (`ROOTFS_POSTPROCESS_COMMAND`) can also delete or
 add files without changing the package list, so "file present" and "package
 installed" are separate questions: use `files-in-image.txt` and `find-path`.
 
-**Built is not installed.** `bitbake -g <image>` writes `task-depends.dot`,
-the *build-time* graph. Recommendations are build dependencies too, so `xauth`
-is built even when it is excluded from the image:
-
-```console
-$ bitbake -g core-image-minimal && oe-depends-dot -w -k xauth task-depends.dot
-core-image-minimal -> packagegroup-core-ssh-dropbear -> dropbear -> xauth
-```
-
-Use `task-depends.dot` for "why is this recipe being built?" and
-`depends.dot` for "why is this package in the image?".
+**Built is not installed.** A recipe in `tmp/work/` or in the `bitbake -g`
+graph says nothing about the image: `xauth` and its X11 libraries are still
+built when `BAD_RECOMMENDATIONS` keeps them out. See
+[Why not `bitbake -g`?](#why-not-bitbake--g).
 
 **A solid versioned edge is usually not hand-written.** `"whydemo-app" -> "libwhydemo1" [label=">= 1.0"]`
 comes from shlibs, not from the recipe. Check with 3b before searching the
